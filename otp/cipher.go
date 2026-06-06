@@ -3,7 +3,6 @@
 package otp
 
 import (
-	"crypto/cipher"
 	"io"
 )
 

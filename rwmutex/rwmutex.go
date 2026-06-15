@@ -13,11 +13,19 @@ package rwmutex
 // available; a blocked Lock call excludes new readers from acquiring the
 // lock.
 type RWMutex struct {
+	write   chan struct{}
+	readers chan int
 }
 
 // New creates *RWMutex.
 func New() *RWMutex {
-	return nil
+	rw := &RWMutex{
+		write:   make(chan struct{}, 1),
+		readers: make(chan int, 1),
+	}
+	rw.write <- struct{}{}
+	rw.readers <- 0
+	return rw
 }
 
 // RLock locks rw for reading.
@@ -26,7 +34,13 @@ func New() *RWMutex {
 // call excludes new readers from acquiring the lock. See the
 // documentation on the RWMutex type.
 func (rw *RWMutex) RLock() {
+	rc := <-rw.readers
 
+	if rc == 0 {
+		<-rw.write
+	}
+
+	rw.readers <- rc + 1
 }
 
 // RUnlock undoes a single RLock call;
@@ -34,14 +48,27 @@ func (rw *RWMutex) RLock() {
 // It is a run-time error if rw is not locked for reading
 // on entry to RUnlock.
 func (rw *RWMutex) RUnlock() {
+	rc := <-rw.readers
 
+	if rc == 0 {
+		rw.readers <- 0
+		panic("sync: RUnlock unlocked RWMutex")
+	}
+
+	rc--
+
+	if rc == 0 {
+		rw.write <- struct{}{}
+	}
+
+	rw.readers <- rc
 }
 
 // Lock locks rw for writing.
 // If the lock is already locked for reading or writing,
 // Lock blocks until the lock is available.
 func (rw *RWMutex) Lock() {
-
+	<-rw.write
 }
 
 // Unlock unlocks rw for writing. It is a run-time error if rw is
@@ -51,5 +78,9 @@ func (rw *RWMutex) Lock() {
 // goroutine. One goroutine may RLock (Lock) a RWMutex and then
 // arrange for another goroutine to RUnlock (Unlock) it.
 func (rw *RWMutex) Unlock() {
-
+	select {
+	case rw.write <- struct{}{}:
+	default:
+		panic("sync: unlock of unlocked mutex")
+	}
 }
